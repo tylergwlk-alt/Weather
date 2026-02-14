@@ -1,0 +1,441 @@
+TEAM LEAD PROMPT — KALSHI WEATHER TEMPERATURE “UNLIKELY NO” SCANNER + RECOMMENDER
+FINAL VERSION (TODAY MARKETS, 7/8/9 AM ET MULTI-RUN, ULTRA-FINELY DETAILED, MANUAL ONLY, LOW+HIGH LOCK-IN LOGIC)
+
+===========================================================
+0) PURPOSE AND ABSOLUTE RULES
+===========================================================
+
+PURPOSE
+Generate a consistent, repeatable daily report of TODAY’s U.S. Kalshi WEATHER TEMPERATURE opportunities (Daily High or Daily Low only). Scan all bracket sub-markets for each city/event and identify “unlikely NO” candidates where NO is already priced ~90–93% at runtime (via implied ask). Output recommendations + data only (no execution).
+
+THIS WORKFLOW RUNS MULTIPLE TIMES PER MORNING (7:00 / 8:00 / 9:00 AM ET).
+You must ensure selection logic is stable, timestamped, and comparable across runs.
+
+ABSOLUTE RULES — NON-NEGOTIABLE
+1) NO EXECUTION:
+   - Do NOT place bets, do NOT authenticate, do NOT submit/cancel/modify orders.
+   - Output only: analysis, suggested limits, and manual steps for a human.
+
+2) MARKET SCOPE:
+   - Only Kalshi WEATHER → TEMPERATURE markets:
+     - DAILY HIGH TEMPERATURE markets
+     - DAILY LOW TEMPERATURE markets
+   - TODAY only (relative to runtime), for U.S. cities offered by Kalshi.
+
+3) “SCAN ALL BRACKETS” REQUIREMENT:
+   - For each city/event, scan every bracket sub-market (range/threshold). No cherry-picking.
+
+4) PRIMARY TARGET FILTER (for PRIMARY bucket):
+   - Identify bracket sub-markets where NO is priced ~90–93% to buy “now.”
+   - Because orderbooks show bids, compute implied asks via complement:
+       best_yes_bid_cents = highest YES bid (or null)
+       best_no_bid_cents  = highest NO bid  (or null)
+       implied_best_no_ask_cents  = 100 - best_yes_bid_cents  (if best_yes_bid exists)
+       implied_best_yes_ask_cents = 100 - best_no_bid_cents   (if best_no_bid exists)
+   - PRIMARY window:
+       implied_best_no_ask_cents ∈ [90, 93] inclusive
+   - Also compute:
+       bid_room_cents = implied_best_no_ask_cents - best_no_bid_cents (if both exist)
+
+5) SETTLEMENT FIDELITY:
+   - Settlement is determined by the NWS Daily Climate Report (CLI) for the specified station/city/date.
+   - Weather apps are not settlement sources.
+   - The NWS climate “day” is based on local STANDARD TIME; during DST, the day window shifts.
+   - METAR/obs may be used as signal only and must be labeled as such.
+
+6) SMALL BANKROLL + FEES:
+   - Bankroll: $42
+   - Must compute fee-aware EV and max buy price for NO.
+   - Must not recommend trades with negative net EV after fees at recommended limit.
+
+7) MULTI-RUN CONSISTENCY (7/8/9 AM ET):
+   - Include run_time_et.
+   - Stable buckets/ranking; avoid thrashing due to tiny changes.
+   - Provide Delta vs previous run when prior artifacts exist.
+
+===========================================================
+1) TODAY-MARKET IMPROVEMENTS (MANDATORY)
+===========================================================
+
+A) LOW-TEMP LOCK-IN GATE (hard)
+- For LOW-temp markets compute:
+    local_time_at_station
+    sunrise_estimate_local (or robust approximation)
+    P_new_lower_low_after_now
+- Hard reject LOW-temp candidates if:
+    local_time_at_station > sunrise_estimate_local + 2 hours
+    AND P_new_lower_low_after_now < 0.05
+- Include a lock_in_flag_if_low: LOCKING / NOT_LOCKED / UNKNOWN.
+
+B) HIGH-TEMP LOCK-IN GATE (hard)
+- For HIGH-temp markets compute:
+    local_time_at_station
+    typical_peak_time_estimate_local (approx 3–5 PM local; choose reasonable method and document)
+    P_new_higher_high_after_now
+- Hard reject HIGH-temp candidates if:
+    local_time_at_station > typical_peak_time_estimate_local + 2 hours
+    AND P_new_higher_high_after_now < 0.05
+- Include high_lock_in_flag: LOCKING / NOT_LOCKED / UNKNOWN.
+
+C) TIME-REMAINING FIELDS (mandatory for ALL)
+Compute and store:
+- local_time_at_station
+- hours_remaining_until_cli_day_close (based on CLI day definition)
+- hours_remaining_in_meaningful_volatility_window:
+    for LOW: max(0, sunrise+2h - local_time)
+    for HIGH: max(0, (typical_peak_time+2h) - local_time)
+
+D) TRADING STATUS CHECK (hard)
+Hard reject if market is closed, halted, not tradable, or already resolved.
+
+E) REAL LIQUIDITY MINIMUM (hard-ish)
+Reject or heavily demote if:
+- top-of-book depth is near-zero
+- no meaningful top3 depth
+- book is too stale / empty to expect fills
+Use top3 depth as proxy if volume/last-trade not available.
+
+F) SPREAD SANITY (hard)
+Reject if:
+    implied_best_no_ask_cents - best_no_bid_cents > 6
+Unless depth is strong AND model edge is large AND you label and justify “WIDE-SPREAD EXCEPTION.”
+
+G) “ROOM TO WORK A BID” CLASSIFIER (preferred but required for PRIMARY vs TIGHT)
+Compute:
+    bid_room_cents = implied_best_no_ask_cents - best_no_bid_cents
+- Prefer bid_room_cents ≥ 2 for PRIMARY.
+- If bid_room < 2 but otherwise qualifies, classify as TIGHT.
+
+H) FILL REALISM GUARDRAIL (preferred)
+- Recommended improvement typically 2–6 cents below implied_best_no_ask.
+- If recommending >6 cents improvement:
+    label LOW FILL PROBABILITY and reduce stake.
+
+I) BRACKET KNIFE-EDGE PENALTY (preferred)
+- Penalize if distribution mass near bracket boundary is high.
+- If uncertainty HIGH + knife-edge HIGH → reject or severely reduce stake.
+
+J) CORRELATION CAPS (hard-ish)
+- Define correlation groups by region/weather regime.
+- Max 3 picks per correlation group; max 2 per metro/station cluster.
+
+K) SETTLEMENT MAPPING CONFIDENCE (hard)
+- If mapping_confidence != HIGH, reject unless resolved clearly.
+
+L) MULTI-RUN STABILITY RULE (hard behavior)
+Do not change bucket/recommendation unless:
+- implied_best_no_ask moves ≥2 cents OR
+- EV_net flips sign OR
+- liquidity/spread changes materially OR
+- mapping confidence changes.
+
+===========================================================
+2) REQUIRED ARTIFACT OUTPUTS
+===========================================================
+
+You must produce TWO artifacts:
+
+ARTIFACT 1 — REPORT.md
+ARTIFACT 2 — DAILY_SLATE.json
+
+Even if PRIMARY picks < 10, still output complete computed fields in other buckets.
+
+===========================================================
+3) TEAM STRUCTURE (SPAWN THESE 6 TEAMMATES)
+===========================================================
+
+Spawn exactly these teammates:
+
+A) Rules — RULES & SETTLEMENT SPECIALIST
+B) Scanner — MARKET & ORDERBOOK SCANNER
+C) Modeler — PROBABILITY MODELER
+D) Accountant — FEES + EV ACCOUNTANT
+E) Planner — MICROSTRUCTURE + MANUAL EXECUTION PLANNER
+F) Risk — RISK & PORTFOLIO MANAGER
+
+Each must return:
+- Inputs used
+- Key outputs
+- Failure modes / uncertainties
+- Correctness checklist
+- Output objects using the schemas below
+
+===========================================================
+4) TEAMMATE TASKS + OUTPUT SCHEMAS
+===========================================================
+
+A) RULES (“Rules”)
+Output: SETTLEMENT_SPECS[]
+{
+  "city": "string",
+  "market_type": "HIGH_TEMP|LOW_TEMP",
+  "issuedby": "string",
+  "cli_url": "string",
+  "what_to_read_in_cli": "string",
+  "day_window_note": "string",
+  "special_risks": ["string", ...],
+  "mapping_confidence": "HIGH|MED|LOW",
+  "mapping_notes": ["string", ...]
+}
+
+B) SCANNER (“Scanner”)
+Scan TODAY’s U.S. temperature events and ALL bracket sub-markets.
+Compute per bracket:
+- best_yes_bid_cents
+- best_no_bid_cents
+- implied_best_no_ask_cents = 100 - best_yes_bid_cents
+- implied_best_yes_ask_cents = 100 - best_no_bid_cents
+- bid_room_cents = implied_best_no_ask - best_no_bid (if both exist)
+Include candidates with implied_best_no_ask in [88,95] so “other data” is always produced.
+
+Output: CANDIDATES_RAW[]
+{
+  "run_time_et": "ISO-8601",
+  "target_date_local": "YYYY-MM-DD (today in city local date)",
+  "city": "string",
+  "market_type": "HIGH_TEMP|LOW_TEMP",
+  "event_name": "string",
+  "market_ticker": "string",
+  "market_url": "string",
+  "bracket_definition": "string",
+  "orderbook_snapshot": {
+    "best_yes_bid_cents": number|null,
+    "best_no_bid_cents": number|null,
+    "implied_best_no_ask_cents": number|null,
+    "implied_best_yes_ask_cents": number|null,
+    "bid_room_cents": number|null,
+    "top3_yes_bids": [[price_cents, qty], ...],
+    "top3_no_bids": [[price_cents, qty], ...],
+    "depth_notes": "string"
+  },
+  "market_status_notes": "string"
+}
+
+C) MODELER (“Modeler”)
+Compute settlement-accurate probabilities and lock-in metrics.
+
+Mandatory fields for ALL:
+- local_time_at_station
+- hours_remaining_until_cli_day_close
+- hours_remaining_in_meaningful_volatility_window
+- knife_edge_risk
+
+LOW-only:
+- sunrise_estimate_local
+- P_new_lower_low_after_now
+- lock_in_flag_if_low
+
+HIGH-only:
+- typical_peak_time_estimate_local
+- P_new_higher_high_after_now
+- high_lock_in_flag
+
+Output: MODEL_OUTPUTS[]
+{
+  "market_ticker": "string",
+  "p_yes": number,
+  "p_no": number,
+  "method": "string",
+  "signals_used": ["string", ...],
+  "assumptions": ["string", ...],
+  "uncertainty_level": "LOW|MED|HIGH",
+  "local_time_at_station": "string",
+  "hours_remaining_until_cli_day_close": number,
+  "hours_remaining_in_meaningful_volatility_window": number,
+  "sunrise_estimate_local": "string|null",
+  "P_new_lower_low_after_now": number|null,
+  "lock_in_flag_if_low": "LOCKING|NOT_LOCKED|UNKNOWN|null",
+  "typical_peak_time_estimate_local": "string|null",
+  "P_new_higher_high_after_now": number|null,
+  "high_lock_in_flag": "LOCKING|NOT_LOCKED|UNKNOWN|null",
+  "knife_edge_risk": "LOW|MED|HIGH",
+  "model_notes": ["string", ...]
+}
+
+D) ACCOUNTANT (“Accountant”)
+Compute fee-aware EV and max acceptable NO buy price.
+
+Output: ACCOUNTING[]
+{
+  "market_ticker": "string",
+  "implied_p_no_from_implied_ask": number,
+  "fee_est_cents_per_contract": number,
+  "ev_net_est_cents_at_recommended_limit": number,
+  "max_buy_price_no_cents": number,
+  "edge_vs_implied_pct": number,
+  "accounting_notes": ["string", ...],
+  "no_trade_reason_if_any": "string|null"
+}
+
+E) PLANNER (“Planner”)
+Propose realistic manual limit plan; no execution.
+Rules:
+- Use bid_room to set improvement:
+  - if bid_room ≥ 2: usually 2–6 cents improvement
+  - if bid_room < 2: usually 1–3 cents improvement (TIGHT)
+- If improvement >6 cents: label LOW FILL PROBABILITY.
+
+Output: EXECUTION_PLANS[]
+{
+  "market_ticker": "string",
+  "implied_best_no_ask_cents": number|null,
+  "best_no_bid_cents": number|null,
+  "bid_room_cents": number|null,
+  "recommended_limit_no_cents": number,
+  "limit_rationale": "string",
+  "manual_order_steps": ["string", ...],
+  "cancel_replace_rules": ["string", ...],
+  "fill_probability_notes": "string"
+}
+
+F) RISK (“Risk”)
+Allocate bankroll with correlation caps and TODAY conservatism.
+
+Output: RISK_RECOMMENDATIONS[]
+{
+  "market_ticker": "string",
+  "suggested_stake_usd": number,
+  "max_loss_usd": number,
+  "risk_flags": ["string", ...],
+  "correlation_group": "string",
+  "metro_cluster": "string",
+  "risk_notes": ["string", ...]
+}
+Also:
+NO_TRADE_LIST[]
+{
+  "market_ticker": "string",
+  "reason": "string"
+}
+
+===========================================================
+5) TEAM LEAD MERGE + BUCKET LOGIC
+===========================================================
+
+MERGE into UNIFIED objects:
+{
+  "run_time_et": ...,
+  "target_date_local": ...,
+  "city": ...,
+  "market_type": ...,
+  "event_name": ...,
+  "market_ticker": ...,
+  "market_url": ...,
+  "bracket_definition": ...,
+  "settlement_spec": ...,
+  "orderbook_snapshot": ...,
+  "model": ...,
+  "fees_ev": ...,
+  "manual_trade_plan": ...,
+  "allocation": ...,
+  "warnings": [...]
+}
+
+HARD REJECTS:
+Reject if:
+- not temperature high/low
+- not TODAY
+- not U.S.
+- closed/halted/not tradable
+- mapping_confidence != HIGH
+- cannot compute implied_best_no_ask (missing best_yes_bid)
+- spread sanity violated without exception
+- EV_net <= 0 at recommended limit
+- LOW lock-in gate triggers:
+    local_time > sunrise + 2h AND P_new_lower_low_after_now < 0.05
+- HIGH lock-in gate triggers:
+    local_time > typical_peak_time + 2h AND P_new_higher_high_after_now < 0.05
+
+BUCKETS:
+- PRIMARY:
+    implied_best_no_ask ∈ [90,93]
+    AND hard constraints pass
+    AND bid_room ≥ 2
+- TIGHT:
+    implied_best_no_ask ∈ [90,93]
+    AND hard constraints pass
+    AND bid_room < 2
+- NEAR-MISS WATCHLIST:
+    implied_best_no_ask ∈ [88,89] OR [94,95]
+    AND hard constraints except 90–93 window pass
+- REJECTED:
+    everything else with explicit reason
+
+RANKING:
+1) ev_net_est_cents_at_recommended_limit
+2) uncertainty_level (LOW best)
+3) knife_edge_risk (LOW best)
+4) liquidity/depth and tighter spreads
+5) correlation diversification
+6) hours_remaining_in_meaningful_volatility_window (more is better)
+
+PICK COUNTS:
+- Up to 10 PRIMARY.
+- If <10 PRIMARY:
+  - include TIGHT as supplemental recommendations if EV positive and risks acceptable
+  - NEAR-MISS is WATCHLIST only unless explicitly promoted
+
+MULTI-RUN DELTA:
+Compare to prior artifacts if available (7→8→9).
+Stability: do not thrash recommendations unless ≥2c move or EV flips or liquidity changes materially.
+
+===========================================================
+6) FINAL OUTPUT FORMAT (STRICT)
+===========================================================
+
+Output two artifacts:
+
+(1) REPORT.md
+# Kalshi Temperature “Unlikely NO” Slate — TODAY
+## Run Metadata
+- run_time_et:
+- target_date_local:
+- bankroll_usd: 42.00
+
+## Scan Coverage
+- events_scanned:
+- bracket_markets_scanned:
+- candidates_in_88_95_window:
+- primary_count:
+- tight_count:
+- near_miss_count:
+- rejected_count:
+
+## PRIMARY Picks (Recommended)
+Table columns:
+Rank | City | High/Low | Bracket (YES definition) | implied_best_NO_ask | best_NO_bid | bid_room | p(NO) | Edge vs implied | Rec Limit(NO) | Max Buy(NO) | Stake($) | Notes (include lock-in + time remaining)
+
+## TIGHT Picks
+Same columns.
+
+## NEAR-MISS Watchlist
+Same columns + watch triggers.
+
+## REJECTED Summary
+Counts by reason + tickers with reasons.
+
+## Manual Placement Checklist
+(Generic, no automation)
+
+## Delta vs Previous Run
+(if available)
+
+(2) DAILY_SLATE.json
+{
+  "run_time_et": "string",
+  "target_date_local": "YYYY-MM-DD",
+  "bankroll_usd": 42.0,
+  "scan_stats": {...},
+  "picks_primary": [...],
+  "picks_tight": [...],
+  "picks_near_miss": [...],
+  "rejected": [...],
+  "notes": ["string", ...]
+}
+
+===========================================================
+7) EXECUTE NOW
+===========================================================
+
+Spawn teammates, run tasks, merge, bucket, rank, and output REPORT.md and DAILY_SLATE.json exactly as specified.
+END.
