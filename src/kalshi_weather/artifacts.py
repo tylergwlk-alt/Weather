@@ -44,7 +44,6 @@ _REPORT_TEMPLATE = Template("""\
 ## Run Metadata
 - **run_time_et:** {{ slate.run_time_et }}
 - **target_date_local:** {{ slate.target_date_local }}
-- **bankroll_usd:** ${{ "%.2f"|format(slate.bankroll_usd) }}
 
 ## Scan Coverage
 - **events_scanned:** {{ stats.events_scanned }}

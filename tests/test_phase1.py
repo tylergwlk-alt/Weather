@@ -99,5 +99,4 @@ def test_write_report_md(tmp_path):
     assert out.exists()
     content = out.read_text()
     assert "Unlikely NO" in content
-    assert "$42.00" in content
     assert "No PRIMARY picks" in content
