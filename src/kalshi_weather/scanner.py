@@ -82,8 +82,8 @@ def _parse_orderbook(raw_ob: dict) -> OrderbookSnapshot:
         orderbook.no  = [[price_cents, qty], ...] sorted ascending (best bid = last)
     """
     ob = raw_ob.get("orderbook", {})
-    yes_bids = ob.get("yes", [])
-    no_bids = ob.get("no", [])
+    yes_bids = ob.get("yes") or []
+    no_bids = ob.get("no") or []
 
     best_yes_bid = yes_bids[-1][0] if yes_bids else None
     best_no_bid = no_bids[-1][0] if no_bids else None
