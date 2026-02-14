@@ -6,6 +6,8 @@ build/
 .venv/
 venv/
 .env
+run_scanner.bat
+Key/
 output/
 data/
 *.log
