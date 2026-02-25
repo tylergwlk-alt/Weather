@@ -33,6 +33,15 @@ class TestSpikeConfig:
         assert cfg.spike_threshold_cents == 25
         assert cfg.window_seconds == 300
 
+    def test_tracked_cities_default(self):
+        from kalshi_weather.spike_config import SpikeConfig
+
+        cfg = SpikeConfig()
+        assert len(cfg.tracked_cities) == 12
+        assert "Miami" in cfg.tracked_cities
+        assert "New York" in cfg.tracked_cities
+        assert "Washington" in cfg.tracked_cities
+
 
 # ======================================================================
 # Spike Detection Tests
@@ -487,6 +496,114 @@ class TestBurstCollectData:
         assert data is not None
         assert data["signal"] == "STRONG_BUY"
         assert data["precise_f"] == 39.9
+
+
+# ======================================================================
+# Series Discovery Tests
+# ======================================================================
+
+
+class TestDiscoverTrackedSeries:
+    """Test the series discovery + city matching logic."""
+
+    def test_discovers_tracked_cities(self):
+        from kalshi_weather.spike_monitor import (
+            discover_tracked_series,
+        )
+
+        mock_client = MagicMock()
+        mock_client.get_series_list.return_value = [
+            {"ticker": "KXHIGHCHI"},
+            {"ticker": "KXHIGHNY"},
+            {"ticker": "KXHIGHMIA"},
+            {"ticker": "KXLOWCHI"},  # LOW — should be skipped
+            {"ticker": "KXHIGHBOS"},
+        ]
+
+        def mock_get_events(
+            series_ticker="", **kwargs
+        ):
+            city_map = {
+                "KXHIGHCHI": "Chicago",
+                "KXHIGHNY": "New York",
+                "KXHIGHMIA": "Miami",
+                "KXHIGHBOS": "Boston",
+            }
+            city = city_map.get(series_ticker)
+            if city:
+                return (
+                    [
+                        {
+                            "title": (
+                                f"Highest temperature "
+                                f"in {city} on Feb 26"
+                            ),
+                        }
+                    ],
+                    "",
+                )
+            return ([], "")
+
+        mock_client.get_events.side_effect = (
+            mock_get_events
+        )
+
+        result = discover_tracked_series(
+            mock_client,
+            ("Miami", "New York", "Boston"),
+        )
+
+        assert len(result) == 3
+        assert result["KXHIGHMIA"] == "Miami"
+        assert result["KXHIGHNY"] == "New York"
+        assert result["KXHIGHBOS"] == "Boston"
+        # Chicago is not tracked
+        assert "KXHIGHCHI" not in result
+
+    def test_skips_series_with_no_open_events(self):
+        from kalshi_weather.spike_monitor import (
+            discover_tracked_series,
+        )
+
+        mock_client = MagicMock()
+        mock_client.get_series_list.return_value = [
+            {"ticker": "KXHIGHMIA"},
+        ]
+        mock_client.get_events.return_value = ([], "")
+
+        result = discover_tracked_series(
+            mock_client, ("Miami",),
+        )
+        assert len(result) == 0
+
+    def test_handles_alias_matching(self):
+        """Washington DC should match Washington in rules.py."""
+        from kalshi_weather.spike_monitor import (
+            discover_tracked_series,
+        )
+
+        mock_client = MagicMock()
+        mock_client.get_series_list.return_value = [
+            {"ticker": "KXHIGHWAS"},
+        ]
+        mock_client.get_events.return_value = (
+            [
+                {
+                    "title": (
+                        "Highest temperature "
+                        "in Washington on Feb 26"
+                    ),
+                }
+            ],
+            "",
+        )
+
+        # "Washington" is the canonical name in rules.py
+        result = discover_tracked_series(
+            mock_client, ("Washington",),
+        )
+        assert "KXHIGHWAS" in result
+        assert result["KXHIGHWAS"] == "Washington"
 
 
 # ======================================================================

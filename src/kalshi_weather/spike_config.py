@@ -17,3 +17,9 @@ class SpikeConfig:
     start_hour_est: int = 8            # 08:00 EST
     end_hour_est: int = 23             # 23:59 EST
     cooldown_seconds: int = 600        # 10 min before same bracket re-triggers
+    tracked_cities: tuple[str, ...] = (
+        "Washington", "New Orleans", "Phoenix",
+        "San Francisco", "Atlanta", "Minneapolis",
+        "Boston", "Las Vegas", "Dallas",
+        "Seattle", "Miami", "New York",
+    )

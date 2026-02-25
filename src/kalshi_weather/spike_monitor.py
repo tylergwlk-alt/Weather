@@ -18,11 +18,13 @@ from zoneinfo import ZoneInfo
 
 from kalshi_weather.edge import analyze_city
 from kalshi_weather.nws_scraper import NWSScraper
+from kalshi_weather.rules import lookup_station
 from kalshi_weather.scanner import (
     _classify_series,
     _extract_city_from_event,
     _is_today_event,
 )
+from kalshi_weather.schemas import MarketType
 from kalshi_weather.spike_config import SpikeConfig
 
 logger = logging.getLogger(__name__)
@@ -166,6 +168,73 @@ def is_in_operating_window(
     )
 
 
+# ── Series discovery ─────────────────────────────────────────────
+
+
+def discover_tracked_series(
+    client: object,
+    tracked_cities: tuple[str, ...],
+) -> dict[str, str]:
+    """Map KXHIGH series tickers to city names for tracked cities.
+
+    1. Fetches the full series list (1 API call).
+    2. For each HIGH_TEMP series, peeks at one event to extract the city.
+    3. Matches against *tracked_cities* via rules.py aliases.
+
+    Returns ``{series_ticker: canonical_city_name}``.
+    """
+    all_series = client.get_series_list()
+    high_tickers = [
+        s["ticker"]
+        for s in all_series
+        if _classify_series(s.get("ticker", "")) == MarketType.HIGH_TEMP
+    ]
+    logger.info(
+        "Found %d HIGH_TEMP series, resolving cities...",
+        len(high_tickers),
+    )
+
+    # Build canonical lookup set
+    canonical_set: dict[str, str] = {}
+    for city in tracked_cities:
+        station = lookup_station(city)
+        canonical = station["kalshi_city"] if station else city
+        canonical_set[canonical.lower()] = canonical
+
+    result: dict[str, str] = {}
+    for series_ticker in high_tickers:
+        if len(result) >= len(canonical_set):
+            break  # found all tracked cities
+
+        try:
+            events, _ = client.get_events(
+                series_ticker=series_ticker,
+                status="open",
+                with_nested_markets=False,
+                limit=1,
+            )
+        except Exception:
+            logger.debug(
+                "Failed to peek at series %s",
+                series_ticker,
+                exc_info=True,
+            )
+            continue
+
+        if not events:
+            continue
+
+        city = _extract_city_from_event(events[0])
+        station = lookup_station(city)
+        canonical = station["kalshi_city"] if station else city
+
+        if canonical.lower() in canonical_set:
+            result[series_ticker] = canonical
+            logger.info("  %s -> %s", series_ticker, canonical)
+
+    return result
+
+
 # ── Burst data collection ───────────────────────────────────────────
 
 
@@ -242,7 +311,6 @@ def run_spike_monitor(
     """
     import time as _time
 
-    from kalshi_weather.schemas import MarketType
     from kalshi_weather.spike_alerter import (
         build_conviction_row,
         build_spike_email_html,
@@ -258,13 +326,17 @@ def run_spike_monitor(
     cooldowns: dict[str, float] = {}
     ticker_meta: dict[str, tuple[str, str, str]] = {}
     et = ZoneInfo("US/Eastern")
+    last_discovery_date = None
+    tracked_series: dict[str, str] = {}
 
     logger.info(
         "Spike monitor starting "
-        "(threshold=%d\u00a2, window=%ds, poll=%ds)",
+        "(threshold=%d\u00a2, window=%ds, poll=%ds, "
+        "tracking %d cities)",
         config.spike_threshold_cents,
         config.window_seconds,
         config.poll_interval_seconds,
+        len(config.tracked_cities),
     )
 
     try:
@@ -281,54 +353,88 @@ def run_spike_monitor(
                 _time.sleep(60)
                 continue
 
+            # ── Discovery (once per calendar day) ────────
+            current_date = now_est.date()
+            if (
+                last_discovery_date != current_date
+                or not tracked_series
+            ):
+                tracked_series = discover_tracked_series(
+                    client, config.tracked_cities,
+                )
+                last_discovery_date = current_date
+                if tracked_series:
+                    logger.info(
+                        "Tracking %d cities: %s",
+                        len(tracked_series),
+                        ", ".join(
+                            sorted(tracked_series.values())
+                        ),
+                    )
+                else:
+                    logger.warning(
+                        "No tracked series found, "
+                        "retrying in 5 min",
+                    )
+                    _time.sleep(300)
+                    continue
+
             # ── MONITORING phase ─────────────────────────
             mono_now = _time.monotonic()
             today_str = now_est.strftime("%Y-%m-%d")
 
-            try:
-                all_events = client.get_all_events(
-                    status="open",
-                    with_nested_markets=True,
-                )
-            except Exception:
-                logger.warning(
-                    "Failed to fetch events",
-                    exc_info=True,
-                )
-                _time.sleep(config.poll_interval_seconds)
-                continue
-
-            for event in all_events:
-                series = event.get("series_ticker", "")
-                classified = _classify_series(series)
-                if classified != MarketType.HIGH_TEMP:
-                    continue
-                if not _is_today_event(event, today_str):
-                    continue
-
-                city = _extract_city_from_event(event)
-                evt_ticker = event.get(
-                    "event_ticker", "",
-                )
-                prices = extract_bracket_prices(event)
-
-                for ticker, price in prices.items():
-                    history.record(
-                        ticker, price, mono_now,
+            for series_ticker, city in (
+                tracked_series.items()
+            ):
+                try:
+                    events, _ = client.get_events(
+                        series_ticker=series_ticker,
+                        status="open",
+                        with_nested_markets=True,
                     )
-                    bracket_def = ""
-                    for mkt in event.get("markets", []):
-                        if mkt.get("ticker") == ticker:
-                            bracket_def = mkt.get(
-                                "yes_sub_title",
-                                mkt.get("title", ""),
-                            )
-                            break
-                    ticker_meta[ticker] = (
+                except Exception:
+                    logger.warning(
+                        "Failed to fetch %s events",
                         city,
-                        bracket_def,
-                        evt_ticker,
+                        exc_info=True,
                     )
+                    continue
+
+                for event in events:
+                    if not _is_today_event(
+                        event, today_str,
+                    ):
+                        continue
+
+                    evt_ticker = event.get(
+                        "event_ticker", "",
+                    )
+                    prices = extract_bracket_prices(event)
+
+                    for ticker, price in prices.items():
+                        history.record(
+                            ticker, price, mono_now,
+                        )
+                        bracket_def = ""
+                        for mkt in event.get(
+                            "markets", [],
+                        ):
+                            if (
+                                mkt.get("ticker")
+                                == ticker
+                            ):
+                                bracket_def = mkt.get(
+                                    "yes_sub_title",
+                                    mkt.get(
+                                        "title", ""
+                                    ),
+                                )
+                                break
+                        ticker_meta[ticker] = (
+                            city,
+                            bracket_def,
+                            evt_ticker,
+                        )
 
             history.prune_all(mono_now)
 
