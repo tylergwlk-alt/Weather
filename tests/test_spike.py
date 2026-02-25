@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
+from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 # ======================================================================
 # SpikeConfig Tests
@@ -326,3 +329,161 @@ class TestSendSpikeEmail:
             msg = mock_server.send_message.call_args[0][0]
             assert msg["To"] == "test@gmail.com"
             assert msg["From"] == "test@gmail.com"
+
+
+# ======================================================================
+# Market Polling Tests
+# ======================================================================
+
+
+class TestExtractBracketPrices:
+    """Test extracting yes_price from nested market objects."""
+
+    def test_extract_prices_from_event(self):
+        from kalshi_weather.spike_monitor import (
+            extract_bracket_prices,
+        )
+
+        event = {
+            "event_ticker": "KXHIGHCHI-26FEB25",
+            "title": (
+                "Highest temperature in Chicago "
+                "on February 26"
+            ),
+            "markets": [
+                {
+                    "ticker": "KXHIGHCHI-26FEB25-B40",
+                    "yes_bid": 7,
+                    "yes_ask": 12,
+                },
+                {
+                    "ticker": "KXHIGHCHI-26FEB25-B45",
+                    "yes_bid": 50,
+                    "yes_ask": 55,
+                },
+            ],
+        }
+        prices = extract_bracket_prices(event)
+        assert len(prices) == 2
+        assert prices["KXHIGHCHI-26FEB25-B40"] == 7
+        assert prices["KXHIGHCHI-26FEB25-B45"] == 50
+
+    def test_missing_yes_bid_skipped(self):
+        from kalshi_weather.spike_monitor import (
+            extract_bracket_prices,
+        )
+
+        event = {
+            "event_ticker": "KXHIGHCHI-26FEB25",
+            "markets": [
+                {"ticker": "KXHIGHCHI-26FEB25-B40"},
+            ],
+        }
+        prices = extract_bracket_prices(event)
+        assert len(prices) == 0
+
+
+class TestIsInOperatingWindow:
+    def test_inside_window(self):
+        from kalshi_weather.spike_config import SpikeConfig
+        from kalshi_weather.spike_monitor import (
+            is_in_operating_window,
+        )
+
+        cfg = SpikeConfig(
+            start_hour_est=8, end_hour_est=23,
+        )
+        dt = datetime(
+            2026, 2, 25, 15, 0,
+            tzinfo=ZoneInfo("US/Eastern"),
+        )
+        assert is_in_operating_window(dt, cfg) is True
+
+    def test_before_window(self):
+        from kalshi_weather.spike_config import SpikeConfig
+        from kalshi_weather.spike_monitor import (
+            is_in_operating_window,
+        )
+
+        cfg = SpikeConfig(
+            start_hour_est=8, end_hour_est=23,
+        )
+        dt = datetime(
+            2026, 2, 25, 6, 0,
+            tzinfo=ZoneInfo("US/Eastern"),
+        )
+        assert is_in_operating_window(dt, cfg) is False
+
+    def test_after_window(self):
+        from kalshi_weather.spike_config import SpikeConfig
+        from kalshi_weather.spike_monitor import (
+            is_in_operating_window,
+        )
+
+        cfg = SpikeConfig(
+            start_hour_est=8, end_hour_est=23,
+        )
+        dt = datetime(
+            2026, 2, 25, 23, 30,
+            tzinfo=ZoneInfo("US/Eastern"),
+        )
+        assert is_in_operating_window(dt, cfg) is True
+
+    def test_midnight_outside(self):
+        from kalshi_weather.spike_config import SpikeConfig
+        from kalshi_weather.spike_monitor import (
+            is_in_operating_window,
+        )
+
+        cfg = SpikeConfig(
+            start_hour_est=8, end_hour_est=23,
+        )
+        dt = datetime(
+            2026, 2, 26, 0, 5,
+            tzinfo=ZoneInfo("US/Eastern"),
+        )
+        assert is_in_operating_window(dt, cfg) is False
+
+
+class TestBurstCollectData:
+    """Test burst data collection calls edge analysis."""
+
+    def test_collect_burst_data(self):
+        from kalshi_weather.spike_monitor import (
+            collect_burst_data,
+        )
+
+        mock_scraper = MagicMock()
+        mock_client = MagicMock()
+
+        mock_report = MagicMock()
+        mock_report.running_max_f_precise = 39.9
+        mock_report.running_max_c = 4.4
+        mock_report.running_max_cli_f = 40
+        mock_report.running_max_source = (
+            "Current Conditions"
+        )
+        mock_report.metar_temp_f = 39
+        mock_report.bracket = MagicMock()
+        mock_report.bracket.margin_below_c = 0.23
+        mock_report.bracket.margin_status.value = (
+            "COMFORTABLE"
+        )
+        mock_report.signal.value = "STRONG_BUY"
+        mock_report.signal_reason = "Test reason"
+        mock_report.time_risk.value = "PAST_PEAK"
+
+        with patch(
+            "kalshi_weather.spike_monitor.analyze_city",
+            return_value=mock_report,
+        ):
+            data = collect_burst_data(
+                city="Chicago",
+                ticker="KXHIGHCHI-26FEB25-B40",
+                client=mock_client,
+                scraper=mock_scraper,
+            )
+
+        assert data is not None
+        assert data["signal"] == "STRONG_BUY"
+        assert data["precise_f"] == 39.9
