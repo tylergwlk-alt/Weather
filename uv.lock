@@ -262,6 +262,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "pytz" },
+    { name = "tzdata" },
 ]
 
 [package.optional-dependencies]
@@ -283,6 +284,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.2.1" },
     { name = "pytz", specifier = ">=2024.1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
+    { name = "tzdata", specifier = ">=2025.3" },
 ]
 provides-extras = ["dev"]
 
