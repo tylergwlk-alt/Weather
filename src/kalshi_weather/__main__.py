@@ -3,6 +3,7 @@
 Subcommands:
   scan  — Full Kalshi Weather Scanner pipeline (default)
   edge  — Temperature edge analysis from NWS sources
+  spike — Monitor markets for price spikes and send alerts
 """
 
 from __future__ import annotations
@@ -155,6 +156,64 @@ def _run_edge(city: str | None, watch: bool, interval: int) -> int:
     return 0
 
 
+# ── Spike subcommand ─────────────────────────────────────────────────
+
+
+def _run_spike(args) -> int:
+    """Run the spike monitor."""
+    from kalshi_weather.spike_config import SpikeConfig
+    from kalshi_weather.spike_monitor import run_spike_monitor
+
+    api_key_id = os.environ.get("KALSHI_API_KEY_ID", "")
+    private_key_path = os.environ.get(
+        "KALSHI_PRIVATE_KEY_PATH", "",
+    )
+    gmail_address = os.environ.get("GMAIL_ADDRESS", "")
+    gmail_app_password = os.environ.get(
+        "GMAIL_APP_PASSWORD", "",
+    )
+
+    if not api_key_id or not private_key_path:
+        logger.error(
+            "Missing Kalshi credentials. Set "
+            "KALSHI_API_KEY_ID and "
+            "KALSHI_PRIVATE_KEY_PATH environment variables."
+        )
+        return 1
+
+    from kalshi_weather.kalshi_client import KalshiClient
+
+    config = SpikeConfig(
+        spike_threshold_cents=args.threshold,
+        window_seconds=args.window,
+        poll_interval_seconds=args.interval,
+        burst_count=args.burst_count,
+        burst_interval_seconds=args.burst_interval,
+        start_hour_est=args.start_hour,
+        end_hour_est=args.end_hour,
+    )
+
+    client = KalshiClient(
+        api_key_id=api_key_id,
+        private_key_path=private_key_path,
+    )
+
+    try:
+        run_spike_monitor(
+            client=client,
+            config=config,
+            gmail_address=gmail_address,
+            gmail_app_password=gmail_app_password,
+        )
+    except Exception:
+        logger.exception("Spike monitor failed")
+        return 1
+    finally:
+        client.close()
+
+    return 0
+
+
 # ── Main with argparse ───────────────────────────────────────────────
 
 
@@ -202,6 +261,40 @@ def main(argv: list[str] | None = None) -> int:
         help="Polling interval in seconds (default: 300)",
     )
 
+    # spike subcommand
+    spike_parser = subparsers.add_parser(
+        "spike",
+        help="Monitor markets for price spikes and send alerts",
+    )
+    spike_parser.add_argument(
+        "--threshold", type=int, default=20,
+        help="Spike threshold in cents (default: 20)",
+    )
+    spike_parser.add_argument(
+        "--window", type=int, default=360,
+        help="Lookback window in seconds (default: 360)",
+    )
+    spike_parser.add_argument(
+        "--interval", type=int, default=30,
+        help="Polling interval in seconds (default: 30)",
+    )
+    spike_parser.add_argument(
+        "--burst-count", type=int, default=5,
+        help="Number of emails per burst (default: 5)",
+    )
+    spike_parser.add_argument(
+        "--burst-interval", type=int, default=60,
+        help="Seconds between burst emails (default: 60)",
+    )
+    spike_parser.add_argument(
+        "--start-hour", type=int, default=8,
+        help="Start monitoring hour EST (default: 8)",
+    )
+    spike_parser.add_argument(
+        "--end-hour", type=int, default=23,
+        help="End monitoring hour EST (default: 23)",
+    )
+
     args = parser.parse_args(argv)
 
     # Default to 'scan' if no subcommand given
@@ -209,6 +302,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_scan()
     elif args.command == "edge":
         return _run_edge(args.city, args.watch, args.interval)
+    elif args.command == "spike":
+        return _run_spike(args)
 
     parser.print_help()
     return 1

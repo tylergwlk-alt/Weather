@@ -487,3 +487,31 @@ class TestBurstCollectData:
         assert data is not None
         assert data["signal"] == "STRONG_BUY"
         assert data["precise_f"] == 39.9
+
+
+# ======================================================================
+# CLI Integration Tests
+# ======================================================================
+
+
+class TestSpikeSubcommand:
+    def test_spike_args_parsed(self):
+        """Verify argparse recognizes the spike subcommand."""
+        from unittest.mock import patch
+        from kalshi_weather.__main__ import main
+
+        # Should fail on missing credentials, not on arg parsing
+        with patch.dict("os.environ", {}, clear=True):
+            result = main(
+                ["spike", "--threshold", "25", "--interval", "20"],
+            )
+        assert result == 1  # fails on missing creds
+
+    def test_spike_default_runs_scan(self):
+        """No args still defaults to scan."""
+        from unittest.mock import patch
+        from kalshi_weather.__main__ import main
+
+        with patch.dict("os.environ", {}, clear=True):
+            result = main([])
+        assert result == 1  # missing creds for scan
