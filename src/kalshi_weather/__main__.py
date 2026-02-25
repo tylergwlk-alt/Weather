@@ -268,6 +268,9 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         stream=sys.stdout,
     )
+    # Silence httpx request/response chatter (floods logs during pagination)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     parser = argparse.ArgumentParser(
         prog="kalshi_weather",
