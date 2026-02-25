@@ -14,6 +14,10 @@ import os
 import sys
 import time
 
+from dotenv import load_dotenv
+
+load_dotenv(".env.local")
+
 logger = logging.getLogger("kalshi_weather")
 
 
@@ -159,10 +163,37 @@ def _run_edge(city: str | None, watch: bool, interval: int) -> int:
 # ── Spike subcommand ─────────────────────────────────────────────────
 
 
+def _setup_spike_logging() -> None:
+    """Add a rotating file handler for the spike monitor.
+
+    Logs to logs/spike_monitor.log, rotates at 5 MB,
+    keeps 3 backups (~20 MB max on disk).
+    Stdout handler remains from basicConfig.
+    """
+    from logging.handlers import RotatingFileHandler
+    from pathlib import Path
+
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+
+    handler = RotatingFileHandler(
+        log_dir / "spike_monitor.log",
+        maxBytes=5 * 1024 * 1024,   # 5 MB
+        backupCount=3,
+        encoding="utf-8",
+    )
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    ))
+    logging.getLogger().addHandler(handler)
+
+
 def _run_spike(args) -> int:
     """Run the spike monitor."""
     from kalshi_weather.spike_config import SpikeConfig
     from kalshi_weather.spike_monitor import run_spike_monitor
+
+    _setup_spike_logging()
 
     api_key_id = os.environ.get("KALSHI_API_KEY_ID", "")
     private_key_path = os.environ.get(
@@ -183,14 +214,17 @@ def _run_spike(args) -> int:
 
     from kalshi_weather.kalshi_client import KalshiClient
 
+    start_h = 0 if args.all_hours else args.start_hour
+    end_h = 23 if args.all_hours else args.end_hour
+
     config = SpikeConfig(
         spike_threshold_cents=args.threshold,
         window_seconds=args.window,
         poll_interval_seconds=args.interval,
         burst_count=args.burst_count,
         burst_interval_seconds=args.burst_interval,
-        start_hour_est=args.start_hour,
-        end_hour_est=args.end_hour,
+        start_hour_est=start_h,
+        end_hour_est=end_h,
     )
 
     client = KalshiClient(
@@ -293,6 +327,10 @@ def main(argv: list[str] | None = None) -> int:
     spike_parser.add_argument(
         "--end-hour", type=int, default=23,
         help="End monitoring hour EST (default: 23)",
+    )
+    spike_parser.add_argument(
+        "--all-hours", action="store_true",
+        help="Monitor 24/7 (ignore start/end hour)",
     )
 
     args = parser.parse_args(argv)

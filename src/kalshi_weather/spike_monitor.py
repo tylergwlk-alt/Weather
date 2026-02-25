@@ -236,8 +236,9 @@ def run_spike_monitor(
 ) -> None:
     """Run the spike monitor state machine.
 
-    This is the main entry point. Runs until operating window
-    closes or interrupted with Ctrl+C.
+    This is the main entry point. Runs indefinitely
+    (or until interrupted with Ctrl+C). Sleeps through
+    off-hours and resumes when the window reopens.
     """
     import time as _time
 
@@ -271,15 +272,9 @@ def run_spike_monitor(
             now_est = datetime.now(et)
 
             if not is_in_operating_window(now_est, config):
-                if now_est.hour > config.end_hour_est:
-                    logger.info(
-                        "Operating window closed. "
-                        "Shutting down.",
-                    )
-                    break
                 logger.info(
                     "Outside operating window "
-                    "(%02d:00-%02d:59 EST). Waiting...",
+                    "(%02d:00-%02d:59 EST). Sleeping...",
                     config.start_hour_est,
                     config.end_hour_est,
                 )

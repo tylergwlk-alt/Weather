@@ -1,0 +1,18 @@
+[Unit]
+Description=Kalshi Spike Monitor — watches HIGH_TEMP markets for price spikes
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/Weather
+ExecStart=/root/Weather/.venv/bin/python -m kalshi_weather spike --all-hours
+EnvironmentFile=/root/Weather/.env.local
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=spike-monitor
+
+[Install]
+WantedBy=multi-user.target
