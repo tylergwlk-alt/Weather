@@ -308,8 +308,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Spike threshold in cents (default: 15)",
     )
     spike_parser.add_argument(
-        "--window", type=int, default=360,
-        help="Lookback window in seconds (default: 360)",
+        "--window", type=int, default=420,
+        help="Lookback window in seconds (default: 420)",
     )
     spike_parser.add_argument(
         "--interval", type=int, default=30,

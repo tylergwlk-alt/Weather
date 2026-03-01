@@ -10,7 +10,7 @@ class SpikeConfig:
     """All spike monitor thresholds — configurable via CLI flags."""
 
     spike_threshold_cents: int = 15
-    window_seconds: int = 360          # 6 minutes
+    window_seconds: int = 420          # 7 minutes
     poll_interval_seconds: int = 30
     burst_count: int = 5
     burst_interval_seconds: int = 60

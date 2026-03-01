@@ -18,7 +18,7 @@ class TestSpikeConfig:
 
         cfg = SpikeConfig()
         assert cfg.spike_threshold_cents == 15
-        assert cfg.window_seconds == 360
+        assert cfg.window_seconds == 420
         assert cfg.poll_interval_seconds == 30
         assert cfg.burst_count == 5
         assert cfg.burst_interval_seconds == 60
