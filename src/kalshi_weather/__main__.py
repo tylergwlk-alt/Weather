@@ -304,8 +304,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Monitor markets for price spikes and send alerts",
     )
     spike_parser.add_argument(
-        "--threshold", type=int, default=20,
-        help="Spike threshold in cents (default: 20)",
+        "--threshold", type=int, default=15,
+        help="Spike threshold in cents (default: 15)",
     )
     spike_parser.add_argument(
         "--window", type=int, default=360,

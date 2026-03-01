@@ -17,7 +17,7 @@ class TestSpikeConfig:
         from kalshi_weather.spike_config import SpikeConfig
 
         cfg = SpikeConfig()
-        assert cfg.spike_threshold_cents == 20
+        assert cfg.spike_threshold_cents == 15
         assert cfg.window_seconds == 360
         assert cfg.poll_interval_seconds == 30
         assert cfg.burst_count == 5
